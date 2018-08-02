@@ -974,7 +974,7 @@ session_established({xmlstreamelement, El}, StateData) ->
             Acc0 = element_to_origin_accum(El1, StateData),
             User = NewState#state.user,
             Server = NewState#state.server,
-            UserJID = NewState#state.jid,
+            %UserJID = NewState#state.jid,
             To = exml_query:attr(El, <<"to">>),
             ToJID = case To of
                         undefined ->
@@ -1708,7 +1708,7 @@ reroute_unacked_messages(StateData) ->
     ?DEBUG("rerouting unacked messages", []),
     flush_stream_mgmt_buffer(StateData),
     bounce_csi_buffer(StateData),
-    bounce_messages().
+    bounce_messages(StateData).
 
 %%%----------------------------------------------------------------------
 %%% Internal functions
@@ -2682,16 +2682,17 @@ fsm_limit_opts(Opts) ->
     end.
 
 
--spec bounce_messages() -> 'ok'.
-bounce_messages() ->
+-spec bounce_messages(StateData :: state()) -> 'ok'.
+bounce_messages(State) ->
     receive
         {route, From, To, El} ->
+            notify_unacknowledged_msg(State, {From, To, El}),
             ejabberd_router:route(From, To, El),
-            bounce_messages();
+            bounce_messages(State);
         {store_session_info, User, Server, Resource, KV, _FromPid} ->
             ejabberd_sm:store_info(User, Server, Resource, KV)
     after 0 ->
-              ok
+        ok
     end.
 
 %% Return the messages in reverse order than they were received in!
@@ -3071,6 +3072,7 @@ buffer_out_stanza(Packet, #state{stream_mgmt_buffer = Buffer,
              _ ->
                  S
          end,
+    notify_unacknowledged_msg(S, NPacket),
     NS#state{stream_mgmt_buffer_size = NewSize,
              stream_mgmt_buffer = [NPacket | Buffer]}.
 
@@ -3137,6 +3139,30 @@ re_route_packets(Buffer) ->
      || {From, To, Packet} <- lists:reverse(Buffer)],
     ok.
 
+notify_unacknowledged_messages(#state{stream_mgmt_buffer = Buffer} = State) ->
+    notify_unacknowledged_messages(State, Buffer).
+
+notify_unacknowledged_messages(State, Buffer) ->
+    [notify_unacknowledged_msg(State, Msg) || Msg <- lists:reverse(Buffer)],
+    ok.
+
+notify_unacknowledged_msg(#state{resource                = Res,
+                                 server                  = Server,
+                                 stream_mgmt             = SM,
+                                 stream_mgmt_resume_tref = ResumeTimer},
+                          {From, To, Packet}) ->
+    case {SM, ResumeTimer} of
+        {false, _} -> ok;
+        {true, undefined} -> ok;
+        _ ->
+            ejabberd_hooks:run_fold(unacknowledged_message,
+                                    Server,
+                                    mongoose_acc:from_element(Packet, From, To),
+                                    [From, To, Packet, Res]),
+            ok
+    end.
+
+
 finish_state(ok, StateName, StateData) ->
     fsm_next_state(StateName, StateData);
 finish_state(resume, _, StateData) ->
@@ -3152,7 +3178,9 @@ maybe_enter_resume_session(_SMID, #state{} = SD) ->
               undefined ->
                   Seconds = timer:seconds(SD#state.stream_mgmt_resume_timeout),
                   TRef = erlang:send_after(Seconds, self(), resume_timeout),
-                  SD#state{stream_mgmt_resume_tref = TRef};
+                  NewState=SD#state{stream_mgmt_resume_tref = TRef},
+                  notify_unacknowledged_messages(NewState),
+                  NewState;
               _TRef ->
                   SD
           end,
@@ -3268,6 +3296,7 @@ handover_session(SD) ->
                               resumed),
     {N, Messages} = flush_messages(),
     NewSize = N + SD#state.stream_mgmt_buffer_size,
+    notify_unacknowledged_messages(SD,Messages),
     NewBuffer = Messages ++ SD#state.stream_mgmt_buffer,
     NSD = SD#state{authenticated = resumed,
                    stream_mgmt_buffer_size = NewSize,
