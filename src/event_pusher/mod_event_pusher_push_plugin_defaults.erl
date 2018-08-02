@@ -57,7 +57,7 @@ sender_id(From, Packet) ->
 publish_notification(Acc0, From, #jid{lserver = Host} = To, Packet, Services) ->
     BareRecipient = jid:to_bare(To),
     lists:foreach(
-      fun({PubsubJID, Node, Form}) ->
+      fun({_Resource, PubsubJID, Node, Form}) ->
               Stanza = push_notification_iq(From, Packet, Node, Form),
               Acc = mongoose_acc:from_element(Stanza, To, PubsubJID),
               ResponseHandler =

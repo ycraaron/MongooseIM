@@ -53,8 +53,12 @@
     {error, Reason :: term()}.
 
 %% Types
--type publish_service() :: {PubSub :: jid:jid(), Node :: pubsub_node(), Form :: form()}.
--type pubsub_node()        :: binary().
+-type publish_service() :: {Resource :: jid:resource(),
+                            PubSub :: jid:jid(),
+                            Node :: pubsub_node(),
+                            Form :: form()}.
+
+-type pubsub_node() :: binary().
 -type form_field()  :: {Name :: binary(), Value :: binary()}.
 -type form()        :: [form_field()].
 
@@ -134,7 +138,7 @@ iq_handler(From, _To, Acc, IQ = #iq{type = set, sub_el = Request}) ->
     Res = case parse_request(Request) of
               {enable, BarePubsubJID, Node, FormFields} ->
                   ok = mod_event_pusher_push_backend:enable(
-                         jid:to_bare(From), BarePubsubJID, Node, FormFields),
+                         From, BarePubsubJID, Node, FormFields),
                   IQ#iq{type = result, sub_el = []};
               {disable, BarePubsubJID, Node} ->
                   ok = mod_event_pusher_push_backend:disable(
