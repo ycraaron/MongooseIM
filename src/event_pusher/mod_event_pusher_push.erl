@@ -30,6 +30,7 @@
 -export([iq_handler/4,
          handle_publish_response/4,
          remove_user/3,
+         unacknowledged_message/5,
          push_event/3]).
 
 -export([cast/3, cast/4]).
@@ -83,6 +84,7 @@ start(Host, Opts) ->
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH, ?MODULE,
                                   iq_handler, IQDisc),
 
+    ejabberd_hooks:add(unacknowledged_message, Host, ?MODULE, unacknowledged_message, 90),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 90),
 
     ok.
@@ -149,6 +151,9 @@ iq_handler(From, _To, Acc, IQ = #iq{type = set, sub_el = Request}) ->
           end,
     {Acc, Res}.
 
+unacknowledged_message(Acc, From, To, Packet, Res) ->
+    exml_query:subelement(Packet, <<"body">>) /= undefined
+    andalso publish_unack_message(Acc, Res, From, To, Packet).
 
 %%--------------------------------------------------------------------
 %% Router callbacks
@@ -177,6 +182,15 @@ publish_message(Acc, From, To, Packet) ->
     BareRecipient = jid:to_bare(To),
     {ok, Services} = mod_event_pusher_push_backend:get_publish_services(BareRecipient),
     mod_event_pusher_push_plugin:publish_notification(Acc, From, To, Packet, Services).
+
+publish_unack_message(Acc, Res, From, To, Packet) ->
+    ?DEBUG("Handle push notification ~p", [{Res, From, To, Packet}]),
+
+    BareRecipient = jid:to_bare(To),
+    {ok, Services0} = mod_event_pusher_push_backend:get_publish_services(BareRecipient),
+    Services = [S || {R, _, _, _} = S <- Services0, R =:= Res],
+    mod_event_pusher_push_plugin:publish_notification(Acc, From, To, Packet, Services).
+
 
 %%--------------------------------------------------------------------
 %% Helper functions
