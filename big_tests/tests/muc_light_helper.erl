@@ -102,8 +102,9 @@ assert_archive_element({{muc_message, Room, Sender, Body}, Stanza}) ->
                        delay_from = FromJid} = Stanza;
 assert_archive_element({{message, Sender, Body}, Stanza}) ->
     FromJid = escalus_utils:jid_to_lower(escalus_utils:get_jid(Sender)),
-    #forwarded_message{message_body = Body, delay_from = FromJid} = Stanza.
-
+    #forwarded_message{message_body = Body, delay_from = FromJid} = Stanza;
+assert_archive_element({{chat_marker, Type}, Stanza}) ->
+    #forwarded_message{chat_marker = Type} = Stanza.
 
 muc_light_room_jid(Room, User) ->
     RoomJid = room_bin_jid(Room),
