@@ -226,12 +226,15 @@ is_roles_config({_PortIpNet, ejabberd_cowboy, Opts}, client) ->
 is_roles_config(_, _) -> false.
 
 mapfromlist(L) ->
-    Nl = lists:keymap(fun(B) -> binary_to_existing_atom(B, utf8) end, 1, L),
+    Nl = lists:map(fun({K, {V}}) when is_list(V) ->
+                           {binary_to_existing_atom(K, utf8), mapfromlist(V)};
+                      ({K, V}) ->
+                           {binary_to_existing_atom(K, utf8), V}
+                   end, L),
     maps:from_list(Nl).
 
 decode_maplist(Ml) ->
-    Pl = [C || {C} <- Ml],
-    [mapfromlist(L) || L <- Pl].
+    [mapfromlist(L) || {L} <- Ml].
 
 
 to_list(V) when is_binary(V) ->
@@ -243,14 +246,14 @@ maybe_enable_mam(rdbms, Host, Config) ->
     init_module(Host, mod_mam_rdbms_arch, [muc, pm, simple]),
     init_module(Host, mod_mam_rdbms_prefs, [muc, pm]),
     init_module(Host, mod_mam_rdbms_user, [muc, pm]),
-    init_module(Host, mod_mam, []),
-    init_module(Host, mod_mam_muc, [{host, "muclight.@HOST@"}]),
+    init_module(Host, mod_mam, [{archive_chat_markers, true}]),
+    init_module(Host, mod_mam_muc, [{host, "muclight.@HOST@"}, {archive_chat_markers, true}]),
     [{mam_backend, rdbms} | Config];
 maybe_enable_mam(riak, Host,  Config) ->
     init_module(Host, mod_mam_riak_timed_arch_yz, [pm, muc]),
     init_module(Host, mod_mam_mnesia_prefs, [pm, muc]),
-    init_module(Host, mod_mam, []),
-    init_module(Host, mod_mam_muc, [{host, "muclight.@HOST@"}]),
+    init_module(Host, mod_mam, [{archive_chat_markers, true}]),
+    init_module(Host, mod_mam_muc, [{host, "muclight.@HOST@"}, {archive_chat_markers, true}]),
     [{mam_backend, riak}, {archive_wait, 2500} | Config];
 maybe_enable_mam(_, _, C) ->
     [{mam_backend, disabled} | C].
