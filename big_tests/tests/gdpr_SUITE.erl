@@ -13,7 +13,6 @@
 -export([init_per_testcase/2, end_per_testcase/2]).
 -export([
          retrieve_vcard/1,
-         remove_vcard/1,
          retrieve_roster/1,
          retrieve_mam/1,
          retrieve_offline/1,
@@ -29,6 +28,8 @@
 -export([
          data_is_not_retrieved_for_missing_user/1
         ]).
+
+-export([remove_vcard/1,remove_pubsub_subscriptions/1]).
 
 -import(ejabberdctl_helper, [ejabberdctl/3]).
 
@@ -83,11 +84,13 @@ groups() ->
                              ]},
         {remove_personal_data, [], [
             % per type
-            remove_vcard
+            remove_vcard,
+            remove_pubsub_subscriptions
         ]},
         {remove_personal_data_with_mods_disabled, [], [
             % per type
-            remove_vcard
+%%            remove_vcard,
+            remove_pubsub_subscriptions
         ]}
     ].
 
@@ -105,7 +108,11 @@ init_per_group(retrieve_personal_data_with_mods_disabled, Config) ->
     dynamic_modules:ensure_modules(domain(), pubsub_required_modules()),
     [{disable_module, true} | Config];
 init_per_group(remove_personal_data_with_mods_disabled, Config) ->
+    dynamic_modules:ensure_modules(domain(), pubsub_required_modules()),
     [{disable_module, true} | Config];
+init_per_group(remove_personal_data, Config) ->
+    dynamic_modules:ensure_modules(domain(), pubsub_required_modules()),
+    Config;
 init_per_group(retrieve_personal_data_pubsub, Config) ->
     dynamic_modules:ensure_modules(domain(), pubsub_required_modules()),
     Config;
@@ -367,6 +374,25 @@ retrieve_pubsub_subscriptions(Config) ->
             pubsub_tools:delete_node(Alice, Node, [])
         end).
 
+remove_pubsub_subscriptions(Config) ->
+    escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
+        Node = {_Domain, NodeName} = pubsub_tools:pubsub_node(),
+        pubsub_tools:create_node(Alice, Node, []),
+        pubsub_tools:subscribe(Bob, Node, []),
+        BobU = escalus_utils:jid_to_lower(escalus_client:username(Bob)),
+        BobS = escalus_utils:jid_to_lower(escalus_client:server(Bob)),
+        maybe_stop_and_unload_module(mod_pubsub, mod_pubsub_db_backend, Config),
+        {0, _} = unregister(Bob, Config),
+
+        mongoose_helper:wait_until(
+            fun() ->
+                mongoose_helper:successful_rpc(mod_pubsub, get_personal_data,
+                    [BobU, BobS])
+            end, empty_pubsub_gdpr_result()),
+
+        pubsub_tools:delete_node(Alice, Node, [])
+                                                        end).
+
 retrieve_all_pubsub_data(Config) ->
     escalus:fresh_story(Config, [{alice, 1}, {bob, 1}], fun(Alice, Bob) ->
         Node1 = {_Domain, NodeName1} = pubsub_tools:pubsub_node(),
@@ -607,4 +633,9 @@ item_content_xml(Data) ->
     #xmlel{name = <<"entry">>,
            attrs = [{<<"xmlns">>, <<"http://www.w3.org/2005/Atom">>}],
            children = [#xmlcdata{content = Data}]}.
+
+empty_pubsub_gdpr_result() ->
+    [{pubsub_payloads,["node_name","item_id","payload"],[]},
+     {pubsub_nodes,["node_name","type"],[]},
+     {pubsub_subscriptions, ["node_name"],[]}].
 
