@@ -14,7 +14,8 @@
 -export([
          retrieve_vcard/1,
          retrieve_roster/1,
-         retrieve_mam/1,
+         retrieve_mam_pm/1,
+         retrieve_mam_muc_light/1,
          retrieve_offline/1,
          retrieve_pubsub_payloads/1,
          retrieve_created_pubsub_nodes/1,
@@ -48,7 +49,8 @@ all() ->
     [
      {group, retrieve_personal_data},
      {group, retrieve_personal_data_with_mods_disabled},
-     {group, retrieve_negative}
+     {group, retrieve_negative},
+     {group, retrieve_personal_data_mam}
     ].
 
 groups() ->
@@ -58,7 +60,6 @@ groups() ->
      {retrieve_personal_data, [], [
                                            retrieve_vcard,
                                            retrieve_roster,
-                                           %retrieve_mam,
                                            retrieve_offline,
                                            retrieve_inbox,
                                            retrieve_inbox_for_multiple_messages,
@@ -89,7 +90,10 @@ groups() ->
                                               ]},
      {retrieve_negative, [], [
                               data_is_not_retrieved_for_missing_user
-                             ]}
+                             ]},
+     {retrieve_personal_data_mam, [], [
+                                       retrieve_mam_pm,
+                                       retrieve_mam_muc_light]}
     ].
 
 init_per_suite(Config) ->
@@ -125,12 +129,13 @@ init_per_testcase(retrieve_vcard = CN, Config) ->
         _ ->
             escalus:init_per_testcase(CN, Config)
     end;
-init_per_testcase(retrieve_mam = CN, Config) ->
+init_per_testcase(CN, Config) when CN =:= retrieve_mam_muc_light;
+                                   CN =:= retrieve_mam_pm ->
     case pick_backend_for_mam() of
         skip ->
             {skip, no_supported_backends};
         Backend ->
-            dynamic_modules:ensure_modules(domain(), mam_required_modules(Backend)),
+            dynamic_modules:ensure_modules(domain(), mam_required_modules(CN, Backend)),
             escalus:init_per_testcase(CN, Config)
     end;
 init_per_testcase(CN, Config) ->
@@ -159,21 +164,25 @@ inbox_opts() ->
      {groupchat, [muclight]},
      {markers, [displayed]}].
 
+
 pick_backend_for_mam() ->
-    BackendsList = [
-                    {mam_helper:is_cassandra_enabled(domain()), cassandra},
+    BackendsList = [{mam_helper:is_cassandra_enabled(domain()), cassandra},
                     {mam_helper:is_riak_enabled(domain()), riak},
                     {mam_helper:is_elasticsearch_enabled(domain()), elasticsearch},
                     {mongoose_helper:is_rdbms_enabled(domain()), rdbms}
                    ],
-    lists:foldl(fun({true, Backend}, skip) ->
-                        Backend;
-                   (_, BackendOrSkip) ->
-                        BackendOrSkip
+    lists:foldl(fun({true, Backend}, skip) -> Backend;
+                   (_, BackendOrSkip) -> BackendOrSkip
                 end, skip, BackendsList).
 
-mam_required_modules(Backend) ->
-    [{mod_mam_meta, [{backend, Backend}, {pm, []}]}].
+mam_required_modules(retrieve_mam_pm, Backend) ->
+    [{mod_mam_meta, [{backend, Backend},
+                     {pm, [{archive_groupchats, false}]}]}];
+mam_required_modules(retrieve_mam_muc_light, Backend) ->
+    [{mod_mam_meta, [{backend, Backend},
+                     {pm, [{archive_groupchats, false}]},
+                     {muc, [{host, "muclight.@HOST@"}]}]},
+     {mod_muc_light, [{host, "muclight.@HOST@"}]}].
 
 pubsub_required_modules() ->
     [{mod_caps, []}, {mod_pubsub, [
@@ -225,8 +234,27 @@ retrieve_roster(Config) ->
                 Alice, Config, "roster", ExpectedHeader, ExpectedItems)
         end).
 
-retrieve_mam(_Config) ->
-    ok.
+retrieve_mam_pm(Config) ->
+    F = fun(Alice, Bob) ->
+            escalus:send(Alice, escalus_stanza:chat_to(Bob, <<"some simple pm message">>)),
+            mam_helper:wait_for_archive_size(Alice, 1)
+            %% TODO:
+            %%    add some retrieve_and_validate_personal_data() call here
+        end,
+    escalus_fresh:story(Config, [{alice, 1}, {bob, 1}], F).
+
+retrieve_mam_muc_light(Config) ->
+    F = fun(Alice, Bob) ->
+            RoomJid = muc_light_helper:given_muc_light_room(undefined, Alice, [{Bob, member}]),
+            [Room, Domain] = string:split(RoomJid, <<"@">>),
+            M1 = muc_light_helper:when_muc_light_message_is_sent(Alice, Room,
+                                                                 <<"some simple muc message">>, <<"Id1">>),
+            muc_light_helper:then_muc_light_message_is_received_by([Alice,Bob], M1),
+            mam_helper:wait_for_room_archive_size(Domain, Room, 1)
+            %% TODO:
+            %%    add some retrieve_and_validate_personal_data() call here
+        end,
+    escalus_fresh:story(Config, [{alice, 1}, {bob, 1}], F).
 
 retrieve_offline(Config) ->
     escalus:fresh_story(Config, [{alice, 1}, {bob, 1}, {kate, 1}], fun(Alice, Bob, Kate) ->
