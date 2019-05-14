@@ -30,8 +30,8 @@ cp tools/ssl/mongooseim/{cert,key}.pem "$LDAP_CERT_DIR"
 cp tools/ssl/ca/cacert.pem "$LDAP_CERT_DIR"
 
 docker rm -f mongooseim-ldap || echo "Skip removing previous container"
-# Host on non-standard higher port 3389 to avoid problems with lower ports
-# Default LDAP port is 389
+# Host on non-standard higher ports 3389 and 3636 to avoid problems with lower ports
+# Default LDAP ports are 389 (TCP) and 636 (TLS)
 
 docker run -d \
     --name mongooseim-ldap \
