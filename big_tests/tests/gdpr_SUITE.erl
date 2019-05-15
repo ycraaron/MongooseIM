@@ -236,10 +236,20 @@ retrieve_roster(Config) ->
 
 retrieve_mam_pm(Config) ->
     F = fun(Alice, Bob) ->
-            escalus:send(Alice, escalus_stanza:chat_to(Bob, <<"some simple pm message">>)),
-            mam_helper:wait_for_archive_size(Alice, 1)
-            %% TODO:
-            %%    add some retrieve_and_validate_personal_data() call here
+            Msg1 = <<"some simple pm message">>,
+            Msg2 = <<"another simple pm message">>,
+            Msg3 = <<"third simple pm message">>,
+            escalus:send(Alice, escalus_stanza:chat_to(Bob, Msg1)),
+            escalus:send(Bob, escalus_stanza:chat_to(Alice, Msg2)),
+            escalus:send(Alice, escalus_stanza:chat_to(Bob, Msg3)),
+            mam_helper:wait_for_archive_size(Alice, 3),
+            ExpectedHeader = ["id", "message"],
+            ExpectedItems = [
+                                #{"message" => [{contains, Msg1}]},
+                                #{"message" => [{contains, Msg3}]}
+                            ],
+            retrieve_and_validate_personal_data(
+                Alice, Config, "mam_pm", ExpectedHeader, ExpectedItems)
         end,
     escalus_fresh:story(Config, [{alice, 1}, {bob, 1}], F).
 
